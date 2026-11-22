@@ -9,14 +9,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/quic-go/quic-go/internal/handshake"
-	"github.com/quic-go/quic-go/internal/monotime"
-	"github.com/quic-go/quic-go/internal/protocol"
-	"github.com/quic-go/quic-go/internal/qerr"
-	"github.com/quic-go/quic-go/internal/utils"
-	"github.com/quic-go/quic-go/internal/wire"
-	"github.com/quic-go/quic-go/qlog"
-	"github.com/quic-go/quic-go/qlogwriter"
+	"github.com/eddiexyang/quic-go/internal/handshake"
+	"github.com/eddiexyang/quic-go/internal/monotime"
+	"github.com/eddiexyang/quic-go/internal/protocol"
+	"github.com/eddiexyang/quic-go/internal/qerr"
+	"github.com/eddiexyang/quic-go/internal/utils"
+	"github.com/eddiexyang/quic-go/internal/wire"
+	"github.com/eddiexyang/quic-go/qlog"
+	"github.com/eddiexyang/quic-go/qlogwriter"
 )
 
 // ErrServerClosed is returned by [Listener.Accept] or [EarlyListener.Accept]

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/quic-go/quic-go"
-	quicproxy "github.com/quic-go/quic-go/integrationtests/tools/proxy"
+	"github.com/eddiexyang/quic-go"
+	quicproxy "github.com/eddiexyang/quic-go/integrationtests/tools/proxy"
 
 	"github.com/stretchr/testify/require"
 )

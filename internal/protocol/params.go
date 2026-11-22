@@ -6,7 +6,7 @@ import "time"
 const InitialPacketSize = 1280
 
 // MaxCongestionWindowPackets is the maximum congestion window in packet.
-const MaxCongestionWindowPackets = 10000
+const MaxCongestionWindowPackets = 32768
 
 // MaxUndecryptablePackets limits the number of undecryptable packets that are queued in the connection.
 const MaxUndecryptablePackets = 32
@@ -28,7 +28,7 @@ const DefaultMaxReceiveStreamFlowControlWindow = 6 * (1 << 20) // 6 MB
 const DefaultMaxReceiveConnectionFlowControlWindow = 15 * (1 << 20) // 15 MB
 
 // WindowUpdateThreshold is the fraction of the receive window that has to be consumed before an higher offset is advertised to the client
-const WindowUpdateThreshold = 0.25
+const WindowUpdateThreshold = 0.125
 
 // DefaultMaxIncomingStreams is the maximum number of streams that a peer may open
 const DefaultMaxIncomingStreams = 100
@@ -40,7 +40,7 @@ const DefaultMaxIncomingUniStreams = 100
 const MaxServerUnprocessedPackets = 1024
 
 // MaxConnUnprocessedPackets is the max number of packets stored in each connection that are not yet processed.
-const MaxConnUnprocessedPackets = 256
+const MaxConnUnprocessedPackets = 16384
 
 // SkipPacketInitialPeriod is the initial period length used for packet number skipping to prevent an Optimistic ACK attack.
 // Every time a packet number is skipped, the period is doubled, up to SkipPacketMaxPeriod.

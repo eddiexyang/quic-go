@@ -7,9 +7,9 @@ import (
 	"flag"
 	"os"
 
-	"github.com/quic-go/quic-go"
-	"github.com/quic-go/quic-go/integrationtests/tools"
-	"github.com/quic-go/quic-go/qlogwriter"
+	"github.com/eddiexyang/quic-go"
+	"github.com/eddiexyang/quic-go/integrationtests/tools"
+	"github.com/eddiexyang/quic-go/qlogwriter"
 )
 
 var (

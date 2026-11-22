@@ -7,15 +7,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/quic-go/quic-go/internal/ackhandler"
-	"github.com/quic-go/quic-go/internal/handshake"
-	"github.com/quic-go/quic-go/internal/mocks"
-	mockackhandler "github.com/quic-go/quic-go/internal/mocks/ackhandler"
-	"github.com/quic-go/quic-go/internal/monotime"
-	"github.com/quic-go/quic-go/internal/protocol"
-	"github.com/quic-go/quic-go/internal/qerr"
-	"github.com/quic-go/quic-go/internal/utils"
-	"github.com/quic-go/quic-go/internal/wire"
+	"github.com/eddiexyang/quic-go/internal/ackhandler"
+	"github.com/eddiexyang/quic-go/internal/handshake"
+	"github.com/eddiexyang/quic-go/internal/mocks"
+	mockackhandler "github.com/eddiexyang/quic-go/internal/mocks/ackhandler"
+	"github.com/eddiexyang/quic-go/internal/monotime"
+	"github.com/eddiexyang/quic-go/internal/protocol"
+	"github.com/eddiexyang/quic-go/internal/qerr"
+	"github.com/eddiexyang/quic-go/internal/utils"
+	"github.com/eddiexyang/quic-go/internal/wire"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -490,7 +490,7 @@ func testPackConnectionCloseCoalesced(t *testing.T, pers protocol.Perspective) {
 	}
 }
 
-// Regression test for https://github.com/quic-go/quic-go/issues/5857
+// Regression test for https://github.com/eddiexyang/quic-go/issues/5857
 func TestPackConnectionCloseCoalescedClient1RTT(t *testing.T) {
 	const maxPacketSize protocol.ByteCount = protocol.MaxPacketBufferSize
 	mockCtrl := gomock.NewController(t)

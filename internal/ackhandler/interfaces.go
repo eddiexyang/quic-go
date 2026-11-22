@@ -1,9 +1,10 @@
 package ackhandler
 
 import (
-	"github.com/quic-go/quic-go/internal/monotime"
-	"github.com/quic-go/quic-go/internal/protocol"
-	"github.com/quic-go/quic-go/internal/wire"
+	"github.com/eddiexyang/quic-go/congestion"
+	"github.com/eddiexyang/quic-go/internal/monotime"
+	"github.com/eddiexyang/quic-go/internal/protocol"
+	"github.com/eddiexyang/quic-go/internal/wire"
 )
 
 // SentPacketHandler handles ACKs received for outgoing packets
@@ -36,4 +37,5 @@ type SentPacketHandler interface {
 	OnLossDetectionTimeout(now monotime.Time) error
 
 	MigratedPath(now monotime.Time, initialMaxPacketSize protocol.ByteCount)
+	SetCongestionControl(congestion.CongestionControl)
 }

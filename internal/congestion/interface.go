@@ -1,11 +1,11 @@
 package congestion
 
 import (
-	"github.com/quic-go/quic-go/internal/monotime"
-	"github.com/quic-go/quic-go/internal/protocol"
+	"github.com/eddiexyang/quic-go/congestion"
+	"github.com/eddiexyang/quic-go/internal/monotime"
+	"github.com/eddiexyang/quic-go/internal/protocol"
 )
 
-// A SendAlgorithm performs congestion control
 type SendAlgorithm interface {
 	TimeUntilSend(bytesInFlight protocol.ByteCount) monotime.Time
 	HasPacingBudget(now monotime.Time) bool
@@ -18,7 +18,11 @@ type SendAlgorithm interface {
 	SetMaxDatagramSize(protocol.ByteCount)
 }
 
-// A SendAlgorithmWithDebugInfos is a SendAlgorithm that exposes some debug infos
+type SendAlgorithmEx interface {
+	SendAlgorithm
+	OnCongestionEventEx(priorInFlight protocol.ByteCount, eventTime monotime.Time, ackedPackets []congestion.AckedPacketInfo, lostPackets []congestion.LostPacketInfo)
+}
+
 type SendAlgorithmWithDebugInfos interface {
 	SendAlgorithm
 	InSlowStart() bool
