@@ -33,10 +33,11 @@ const (
 	// Constants based on TCP defaults.
 	// The minimum CWND to ensure delayed acks don't reduce bandwidth measurements.
 	// Does not inflate the pacing rate.
-	// The gain used for the STARTUP, equal to 2/ln(2).
-	defaultHighGain = 2.885
-	// The newly derived CWND gain for STARTUP, 2.
-	derivedHighCWNDGain = 2.0
+	defaultHighGain      = 2.885
+	derivedHighCWNDGain  = defaultHighGain
+	bbrMinTsoRate        = Bandwidth(1200000)
+	bbrExtraAckedMax     = 100 * time.Millisecond
+	bbrExtraAckedWinRtts = 5
 
 	debugEnv = "QUIC_GO_BBR_DEBUG"
 )
@@ -154,11 +155,14 @@ func configForProfile(profile Profile) profileConfig {
 		}
 	default:
 		return profileConfig{
-			highGain:                     defaultHighGain,
-			highCwndGain:                 derivedHighCWNDGain,
-			congestionWindowGainConstant: 2.0,
-			numStartupRtts:               roundTripsWithoutGrowthBeforeExitingStartup,
-			bytesLostMultiplier:          2,
+			highGain:                            defaultHighGain,
+			highCwndGain:                        derivedHighCWNDGain,
+			congestionWindowGainConstant:        2.0,
+			numStartupRtts:                      roundTripsWithoutGrowthBeforeExitingStartup,
+			bytesLostMultiplier:                 2,
+			enableAckAggregationStartup:         true,
+			expireAckAggregationStartup:         true,
+			reduceExtraAckedOnBandwidthIncrease: true,
 		}
 	}
 }
@@ -274,6 +278,7 @@ type bbrSender struct {
 	endRecoveryAt congestion.PacketNumber
 	// A window used to limit the number of bytes in flight during loss recovery.
 	recoveryWindow congestion.ByteCount
+	priorCwnd      congestion.ByteCount
 	// If true, consider all samples in recovery app-limited.
 	isAppLimitedRecovery bool // not used
 
@@ -398,6 +403,8 @@ func (b *bbrSender) applyProfile(profile Profile) {
 		b.sampler.EnableOverestimateAvoidance()
 	}
 	b.sampler.SetReduceExtraAckedOnBandwidthIncrease(cfg.reduceExtraAckedOnBandwidthIncrease)
+	b.sampler.SetMaxAckHeightTrackerWindowLength(roundTripCount(bbrExtraAckedWinRtts))
+	b.sampler.SetStartNewAggregationEpochAfterFullRound(true)
 }
 
 func minCongestionWindowForMaxDatagramSize(maxDatagramSize congestion.ByteCount) congestion.ByteCount {
@@ -609,6 +616,9 @@ func (b *bbrSender) OnCongestionEventEx(priorInFlight congestion.ByteCount, even
 
 	// Calculate number of packets acked and lost.
 	bytesAcked := b.sampler.TotalBytesAcked() - totalBytesAckedBefore
+	if bytesAcked > 0 {
+		b.exitingQuiescence = false
+	}
 
 	// After the model is updated, recalculate the pacing rate and congestion
 	// window.
@@ -692,6 +702,39 @@ func (b *bbrSender) getMinRtt() time.Duration {
 	}
 }
 
+func (b *bbrSender) tsoSegsGoal() congestion.ByteCount {
+	mss := max(b.maxDatagramSize, 1)
+	minSegs := congestion.ByteCount(2)
+	if b.PacingRate() < bbrMinTsoRate {
+		minSegs = 1
+	}
+	pacingBps := uint64(float64(b.PacingRate()) / float64(BytesPerSecond))
+	bytes := congestion.ByteCount(min(pacingBps>>10, 65535))
+	segs := max(bytes/mss, minSegs)
+	return min(segs, 127)
+}
+
+func (b *bbrSender) quantizationBudget(cwnd congestion.ByteCount) congestion.ByteCount {
+	mss := max(b.maxDatagramSize, 1)
+	cwnd += 3 * b.tsoSegsGoal() * mss
+	pkts := (cwnd + mss - 1) / mss
+	if pkts%2 == 1 {
+		pkts++
+	}
+	if b.mode == bbrModeProbeBw && b.cycleCurrentOffset == 0 {
+		pkts += 2
+	}
+	return pkts * mss
+}
+
+func (b *bbrSender) ackAggregationCwnd() congestion.ByteCount {
+	if !b.isAtFullBandwidth {
+		return 0
+	}
+	maxAggr := bdpFromRttAndBandwidth(bbrExtraAckedMax, b.bandwidthEstimate())
+	return min(b.sampler.MaxAckHeight(), maxAggr)
+}
+
 // Computes the target congestion window using the specified gain.
 func (b *bbrSender) getTargetCongestionWindow(gain float64) congestion.ByteCount {
 	bdp := bdpFromRttAndBandwidth(b.getMinRtt(), b.bandwidthEstimate())
@@ -702,6 +745,7 @@ func (b *bbrSender) getTargetCongestionWindow(gain float64) congestion.ByteCount
 		congestionWindow = congestion.ByteCount(gain * float64(b.initialCongestionWindow))
 	}
 
+	congestionWindow = b.quantizationBudget(congestionWindow)
 	return max(congestionWindow, b.minCongestionWindow)
 }
 
@@ -853,6 +897,11 @@ func (b *bbrSender) maybeExitStartupOrDrain(now monotime.Time) {
 // Decides whether to enter or exit PROBE_RTT.
 func (b *bbrSender) maybeEnterOrExitProbeRtt(now monotime.Time, isRoundStart, minRttExpired bool) {
 	if minRttExpired && !b.exitingQuiescence && b.mode != bbrModeProbeRtt {
+		if !b.InRecovery() {
+			b.priorCwnd = b.congestionWindow
+		} else {
+			b.priorCwnd = max(b.priorCwnd, b.congestionWindow)
+		}
 		b.mode = bbrModeProbeRtt
 		// b.maybeTraceStateChange(logging.CongestionStateProbRtt)
 		b.pacingGain = 1.0
@@ -889,6 +938,7 @@ func (b *bbrSender) maybeEnterOrExitProbeRtt(now monotime.Time, isRoundStart, mi
 				if b.debug {
 					b.debugPrint("MinRTT: %s", b.getMinRtt())
 				}
+				b.congestionWindow = max(b.congestionWindow, b.priorCwnd)
 				if !b.isAtFullBandwidth {
 					b.enterStartupMode(now)
 				} else {
@@ -897,44 +947,33 @@ func (b *bbrSender) maybeEnterOrExitProbeRtt(now monotime.Time, isRoundStart, mi
 			}
 		}
 	}
-
-	b.exitingQuiescence = false
 }
 
 // Determines whether BBR needs to enter, exit or advance state of the
 // recovery.
 func (b *bbrSender) updateRecoveryState(lastAckedPacket congestion.PacketNumber, hasLosses, isRoundStart bool) {
-	// Disable recovery in startup, if loss-based exit is enabled.
 	if !b.isAtFullBandwidth {
 		return
 	}
 
-	// Exit recovery when there are no losses for a round.
-	if hasLosses {
+	if hasLosses && b.recoveryState == bbrRecoveryStateNotInRecovery {
+		b.priorCwnd = b.congestionWindow
 		b.endRecoveryAt = b.lastSentPacket
+		b.recoveryState = bbrRecoveryStateConservation
+		b.recoveryWindow = 0
+		b.currentRoundTripEnd = b.lastSentPacket
+		return
 	}
 
-	switch b.recoveryState {
-	case bbrRecoveryStateNotInRecovery:
-		if hasLosses {
-			b.recoveryState = bbrRecoveryStateConservation
-			// This will cause the |recovery_window_| to be set to the correct
-			// value in CalculateRecoveryWindow().
-			b.recoveryWindow = 0
-			// Since the conservation phase is meant to be lasting for a whole
-			// round, extend the current round as if it were started right now.
-			b.currentRoundTripEnd = b.lastSentPacket
-		}
-	case bbrRecoveryStateConservation:
-		if isRoundStart {
-			b.recoveryState = bbrRecoveryStateGrowth
-		}
-		fallthrough
-	case bbrRecoveryStateGrowth:
-		// Exit recovery if appropriate.
-		if !hasLosses && lastAckedPacket > b.endRecoveryAt {
-			b.recoveryState = bbrRecoveryStateNotInRecovery
-		}
+	if isRoundStart && b.recoveryState == bbrRecoveryStateConservation {
+		b.recoveryState = bbrRecoveryStateNotInRecovery
+		b.congestionWindow = max(b.congestionWindow, b.priorCwnd)
+		return
+	}
+
+	if b.recoveryState != bbrRecoveryStateNotInRecovery && !hasLosses && lastAckedPacket > b.endRecoveryAt {
+		b.recoveryState = bbrRecoveryStateNotInRecovery
+		b.congestionWindow = max(b.congestionWindow, b.priorCwnd)
 	}
 }
 
@@ -986,12 +1025,9 @@ func (b *bbrSender) calculateCongestionWindow(bytesAcked, excessAcked congestion
 
 	targetWindow := b.getTargetCongestionWindow(b.congestionWindowGain)
 	if b.isAtFullBandwidth {
-		// Add the max recently measured ack aggregation to CWND.
-		targetWindow += b.sampler.MaxAckHeight()
+		targetWindow += b.ackAggregationCwnd()
 	} else if b.enableAckAggregationDuringStartup {
-		// Add the most recent excess acked.  Because CWND never decreases in
-		// STARTUP, this will automatically create a very localized max filter.
-		targetWindow += excessAcked
+		targetWindow += min(excessAcked, bdpFromRttAndBandwidth(bbrExtraAckedMax, b.bandwidthEstimate()))
 	}
 
 	// Instead of immediately setting the target CWND as the new one, BBR grows

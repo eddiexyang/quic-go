@@ -9,7 +9,7 @@ import (
 
 const (
 	maxBurstPackets               = 10
-	maxBurstPacingDelayMultiplier = 1
+	maxBurstPacingDelayMultiplier = 4
 )
 
 // Pacer implements a token bucket pacing algorithm.
