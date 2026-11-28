@@ -1637,7 +1637,10 @@ func TestSentPacketHandlerSpuriousLoss(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.Equal(t, []protocol.PacketNumber{pns[4], pns[5], pns[12], pns[16]}, packets.Acked)
-	require.Equal(t, []protocol.PacketNumber{pns[7], pns[8], pns[9], pns[10], pns[11], pns[13]}, packets.Lost)
+	// Once reordering is confirmed via spurious losses, 1-RTT switches to
+	// adaptive time-based loss detection instead of declaring pns[7..11, 13]
+	// lost by the fixed 3-packet threshold.
+	require.Empty(t, packets.Lost)
 	require.Equal(t,
 		[]qlogwriter.Event{
 			qlog.SpuriousLoss{
@@ -1670,38 +1673,17 @@ func TestSentPacketHandlerSpuriousLoss(t *testing.T) {
 		now,
 	)
 	require.NoError(t, err)
-	require.Equal(t, []protocol.PacketNumber{pns[4], pns[5], pns[12], pns[16], pns[17], pns[18]}, packets.Acked)
-	require.Equal(t, []protocol.PacketNumber{pns[7], pns[8], pns[9], pns[10], pns[11], pns[13], pns[14], pns[15]}, packets.Lost)
+	// pns[7..10] arrive late and are acknowledged normally without spurious loss.
+	require.Equal(t, []protocol.PacketNumber{pns[4], pns[5], pns[12], pns[16], pns[7], pns[8], pns[9], pns[10], pns[17], pns[18]}, packets.Acked)
+	require.Empty(t, packets.Lost)
+	require.Empty(t, eventRecorder.Events(qlog.SpuriousLoss{}))
 
-	require.Equal(t,
-		[]qlogwriter.Event{
-			qlog.SpuriousLoss{
-				EncryptionLevel:  protocol.Encryption1RTT,
-				PacketNumber:     pns[7],
-				PacketReordering: 18 - 7,
-				TimeReordering:   rtt + 2*secondAckDelay - 70*time.Millisecond,
-			},
-			qlog.SpuriousLoss{
-				EncryptionLevel:  protocol.Encryption1RTT,
-				PacketNumber:     pns[8],
-				PacketReordering: 18 - 8,
-				TimeReordering:   rtt + 2*secondAckDelay - 80*time.Millisecond,
-			},
-			qlog.SpuriousLoss{
-				EncryptionLevel:  protocol.Encryption1RTT,
-				PacketNumber:     pns[9],
-				PacketReordering: 18 - 9,
-				TimeReordering:   rtt + 2*secondAckDelay - 90*time.Millisecond,
-			},
-			qlog.SpuriousLoss{
-				EncryptionLevel:  protocol.Encryption1RTT,
-				PacketNumber:     pns[10],
-				PacketReordering: 18 - 10,
-				TimeReordering:   rtt + 2*secondAckDelay - 100*time.Millisecond,
-			},
-		},
-		eventRecorder.Events(qlog.SpuriousLoss{}),
-	)
+	// Genuinely lost packets (pns[11], pns[13], pns[14], pns[15]) are still
+	// declared lost once the adaptive loss timer expires.
+	lossTime := sph.GetLossDetectionTimeout()
+	require.False(t, lossTime.IsZero())
+	require.NoError(t, sph.OnLossDetectionTimeout(lossTime.Add(time.Second)))
+	require.Equal(t, []protocol.PacketNumber{pns[11], pns[13], pns[14], pns[15]}, packets.Lost)
 }
 
 func BenchmarkSendAndAcknowledge(b *testing.B) {

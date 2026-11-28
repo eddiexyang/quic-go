@@ -622,13 +622,18 @@ func (b *bbrSender) OnCongestionEventEx(priorInFlight congestion.ByteCount, even
 	// that through OnCongestionEventEx, we will only do an estimate using acked/lost packets
 	// for now. Because of fast retransmission, they should differ by no more than 2 packets.
 	// (this is controlled by packetThreshold in quic-go's sentPacketHandler)
+	maxReorderingMargin := max(congestion.PacketNumber(300), congestion.PacketNumber(b.congestionWindow/max(b.maxDatagramSize, 1))+64)
 	var leastUnacked congestion.PacketNumber
 	if len(ackedPackets) != 0 {
-		leastUnacked = ackedPackets[len(ackedPackets)-1].PacketNumber - 2
+		if last := ackedPackets[len(ackedPackets)-1].PacketNumber; last > maxReorderingMargin {
+			leastUnacked = last - maxReorderingMargin
+		}
 	} else {
 		leastUnacked = lostPackets[len(lostPackets)-1].PacketNumber + 1
 	}
-	b.sampler.RemoveObsoletePackets(leastUnacked)
+	if leastUnacked > 0 {
+		b.sampler.RemoveObsoletePackets(leastUnacked)
+	}
 
 	if isRoundStart {
 		b.numLossEventsInRound = 0
